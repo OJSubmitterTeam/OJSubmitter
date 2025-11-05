@@ -1,0 +1,8 @@
+LAST_LOGIN_ACCOUNT = "last_login_account"
+CHECKBOX_CHECKED = "checked"
+COMBOX_CURRENT_INDEX = "current_index"
+COMBOX_CURRENT_TEXT = "current_text"
+LINEEDIT_TEXT = "text"
+BTN_ENABLED = "enabled"
+BTN_TEXT = "text"
+SPIN_VALUE = "value"

@@ -1,0 +1,3 @@
+[submodule "src/SecretAPI"]
+	path = src/SecretAPI
+	url = https://github.com/OJSubmitterTeam/OJSubmitterSecretAPI.git
