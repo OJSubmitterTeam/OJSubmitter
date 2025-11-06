@@ -1,4 +1,4 @@
-"""[tools]代码格式化工具"""
+"""[tools]导入排序工具"""
 
 import subprocess
 import sys
@@ -6,7 +6,7 @@ from typing import List
 
 
 def main() -> None:
-    cmd: List[str] = ["black", "."]
+    cmd: List[str] = ["isort", "."]
 
     extra_args = sys.argv[1:]
     if extra_args:
