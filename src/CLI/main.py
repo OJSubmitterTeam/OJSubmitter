@@ -58,7 +58,7 @@ def problem_submit() -> None:
         while problem_group.running_status == RunningStatus.NOT_STARTED:
             dynamic_loader.next_for_times(times=3, interval=1)
 
-    if problem_group.running_status == RunningStatus.END:
+    if problem_group.running_status == RunningStatus.ENDED:
         logger.error("练习组已结束", source=LSE.CLI_PROBLEM_SUBMIT)
 
         if not default_choice(prompt="是否强制提交(y/N)", default=False):
