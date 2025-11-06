@@ -1,14 +1,13 @@
-from typing import Dict, List
+from typing import List, Optional
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QKeyEvent
 from PyQt6.QtWidgets import QComboBox
 
-from ...OJSubmitter.Constant.fields import LAST_LOGIN_ACCOUNT
-from ...OJSubmitter.Constant.status import LoginStatus
+from src.OJSubmitter.Models.identify import AccountParams, CookieModel
+
 from ...OJSubmitter.Crawler.crawler import Account
 from ...OJSubmitter.Interface.log_interface import BaseLogger
-from ...OJSubmitter.Models.identify import AccountParams
 from ...OJSubmitter.Resource import Resource
 from ...OJSubmitter.Store.shared_instances import AccountManager, SharedInstances
 from ...Util.function_linker import FunctionLinker
@@ -29,9 +28,8 @@ class AccountLogic(LogicFrame):
         }
 
         self._all_login_logic_fn = (
-            FunctionLinker(self.login_account)
-            .then(self.update_logged_accounts)
-            .then(self.set_current_account)
+            FunctionLinker(self.login_account).then(self.update_logged_accounts)
+            # .then(self.set_current_account)
             .then(self.choose_current_account)
         )
 
@@ -60,33 +58,30 @@ class AccountLogic(LogicFrame):
             case _:
                 pass
 
-    def __update(self) -> None:
-        self.update_account_status()
-        self.update_accounts_box()
-        self.update_logged_accounts()
-        self.switch_to_chosen_account()
-
-    @property
-    def history_accounts(self) -> Dict[str, AccountParams]:
-        return Resource().resource.history_accounts
-
     def update_password_text(self) -> None:
+        """根据accounts_box选择的账号更新密码输入框内容"""
         account = self.window.accounts_box.currentText()
 
-        if account in self.history_accounts:
-            params = self.history_accounts[account]
+        if account in self.account_manager.accounts_map:
+            params = self.account_manager.accounts_map[account]
             self.window.password_text.setText(params.password)
         else:
             self.window.password_text.clear()
 
+    def load_accounts_from_resource(self) -> None:
+        """从资源文件加载账号信息到account_manager中"""
+        r: Resource = SharedInstances.resource
+        self.account_manager.load_from_resource(r)
+
     def update_accounts_box(self) -> None:
+        """刷新accounts_box中的账号列表"""
         self.window.accounts_box.clear()
-        history_accounts = self.history_accounts
-        for account, params in history_accounts.items():
-            self.window.accounts_box.addItem(account)
-            self.window.password_text.setText(params.password)
+        accounts = self.account_manager.accounts_map
+        for acc in accounts.values():
+            self.window.accounts_box.addItem(acc.account)
 
     def update_remember_checkbox(self) -> None:
+        """自动登录需要记住密码，勾选自动登录时强制勾选记住密码"""
         auto_login = self.window.auto_login_checkbox.isChecked()
         if auto_login:  # auto login requires remember password
             self.window.remember_checkbox.setChecked(True)
@@ -95,24 +90,43 @@ class AccountLogic(LogicFrame):
         account = combox.currentText()
         SharedInstances.account_manager.update_current_account(account)
 
-    def set_current_account(self) -> None:
-        self._switch_to_combox_account(self.window.accounts_box)
-
     def switch_to_chosen_account(self) -> None:
+        """切换accounts_to_submit_box选择的账号为当前账号"""
         self._switch_to_combox_account(self.window.accounts_to_submit_box)
 
     def update_logged_accounts(self) -> None:
+        """刷新accounts_to_submit_box中的已登录账号列表"""
         self.window.accounts_to_submit_box.clear()
         accounts: List[Account] = []
 
-        for model in self.account_manager.accounts_map.values():
-            if model.check_cookie_valid():
-                accounts.append(model)
+        for acc in self.account_manager.accounts_map.values():
+            if acc.check_cookie_valid():
+                accounts.append(acc)
 
-        for cookie in accounts:
-            self.window.accounts_to_submit_box.addItem(cookie.account)
+        for acc in accounts:
+            self.window.accounts_to_submit_box.addItem(acc.account)
+
+    def _store_account_to_resource(self, account: str, password: str) -> None:
+        r: Resource = SharedInstances.resource
+        r.resource.history_accounts[account] = AccountParams(
+            account=account, password=password
+        )
+        r.save()
+
+    def _store_cookie_to_resource(self, account: str, cookie: str) -> None:
+        r: Resource = SharedInstances.resource
+        r.resource.cookies[account] = CookieModel(account=account, cookie=cookie)
+        r.save()
+
+    def get_cookie(self, account: str) -> Optional[str]:
+        """从account_manager中获取指定账号的cookie"""
+        am = SharedInstances.account_manager
+        if account in am.accounts_map:
+            return am.accounts_map[account].cookie
+        return None
 
     def choose_current_account(self) -> None:
+        """切换accounts_to_submit_box到account_manager当前账号"""
         current = self.account_manager.current_account
         if current is not None:
             index = self.window.accounts_to_submit_box.findText(current.account)
@@ -120,52 +134,55 @@ class AccountLogic(LogicFrame):
                 self.window.accounts_to_submit_box.setCurrentIndex(index)
 
     def accounts_box_switch_to_account(self, account: str) -> None:
+        """切换accounts_box到指定账号"""
         index = self.window.accounts_box.findText(account)
         if index != -1:
             self.window.accounts_box.setCurrentIndex(index)
 
     def login_account(self) -> None:
+        """登录当前选择的账号"""
         account = self.window.accounts_box.currentText()
         password = self.window.password_text.text()
 
-        acc_obj = Account(account, password)
-        lgn_ret = acc_obj.login()
-        lgn_status = lgn_ret["status"]
+        lgn_success = self.account_manager.login_account(
+            account=account, password=password
+        )
 
         lole = self.logger.error
 
-        if lgn_status == LoginStatus.ERROR_AUTHENTICATION:
-            lole(f"{account}密码错误", source=LogSourceEnum.ACCOUNT_AUTH_SYSTEM)
-            return
-        if lgn_status == LoginStatus.FAILURE:
+        if not lgn_success:
             lole(f"{account}登录失败", source=LogSourceEnum.ACCOUNT_AUTH_SYSTEM)
-            return
-        if lgn_status == LoginStatus.COOKIE_EXPIRED:
-            lole(
-                f"{account}Cookie过期, 请重新登录",
-                source=LogSourceEnum.ACCOUNT_COOKIE_SYSTEM,
-            )
             return
 
         self.logger.emit(
             f"{account}登入成功", source=LogSourceEnum.ACCOUNT_AUTH_SYSTEM, lvl="INF"
         )
 
-        self.account_manager.update_current_account(account=acc_obj)
-        self.account_manager.accounts_map[account] = acc_obj
+        self.account_manager.update_current_account(account)
 
         remember: bool = self.window.remember_checkbox.isChecked()
         if remember:
             self.account_manager.remember_account(account, password)
+            self._store_account_to_resource(account=account, password=password)
 
         auto_login = self.window.auto_login_checkbox.isChecked()
         if auto_login:
-            self.account_manager.keep_cookie(account)
+            ck = self.get_cookie(account=account)
+            if ck is None:
+                self.logger.emit(
+                    f"{account}获取Cookie失败, 无法启用自动登录功能",
+                    source=LogSourceEnum.ACCOUNT_COOKIE_SYSTEM,
+                    lvl="WRN",
+                )
+            else:
+                self._store_cookie_to_resource(account=account, cookie=ck)
 
         self.update_accounts_box()
+        self.update_logged_accounts()
         self.accounts_box_switch_to_account(account)
 
     def logout_account(self) -> None:
+        """登出当前选择的账号"""
         account = self.window.accounts_box.currentText()
         am = SharedInstances.account_manager
         am.logout_account(account)
@@ -175,14 +192,17 @@ class AccountLogic(LogicFrame):
         self.update_logged_accounts()
 
     def forget_account(self) -> None:
+        """忘记当前选择的账号"""
         account = self.window.accounts_box.currentText()
         self.account_manager.forget_account(account)
         self.logger.emit(
             f"{account}已删除", source=LogSourceEnum.ACCOUNT_AUTH_SYSTEM, lvl="INF"
         )
-        self.__update()
+        self.update_logged_accounts()
+        self.update_accounts_box()
 
     def check_expired_cookies(self) -> None:
+        """检查资源文件中已失效的cookie记录"""
         r = SharedInstances.resource.resource
         for account, cookie_model in r.cookies.items():
             acc = Account(account, cookie=cookie_model.cookie)
@@ -194,11 +214,11 @@ class AccountLogic(LogicFrame):
                 )
 
     def update_account_status(self) -> None:
+        """删除资源文件中无效的cookie记录"""
         r = SharedInstances.resource.resource
-        for account in r.cookies.keys():
+        for account in tuple(r.cookies.keys()):
             if account not in r.history_accounts:
                 self.account_manager.logout_account(account)
-                continue
 
     def at_entry(self) -> None:
         # shared instances
@@ -206,24 +226,22 @@ class AccountLogic(LogicFrame):
         self.logger: BaseLogger = SharedInstances.loggers.o_logger
 
         r = Resource()
-        self.account_manager.load_from_resource(r)
+        # load accounts
+        self.load_accounts_from_resource()
+        self.update_accounts_box()
+        self.update_password_text()
 
-        rg = r.local_config_get
         qt_state_restore(
             self.remembered_qwidgets,
             r.resource.qt_states,
         )
 
-        last_account = rg(LAST_LOGIN_ACCOUNT, "")
-        self.window.accounts_box.setCurrentText(
-            last_account
-            if last_account in r.resource.history_accounts
-            else self.window.accounts_box.itemText(0)
-        )
-
-        self.update_password_text()
+        # check cookies
+        self.update_account_status()
         self.check_expired_cookies()
-        self.__update()
+
+        # update logged accounts
+        self.update_logged_accounts()
 
     def at_exit(self) -> None:
         r = SharedInstances.resource

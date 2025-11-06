@@ -1,4 +1,3 @@
-LAST_LOGIN_ACCOUNT = "last_login_account"
 CHECKBOX_CHECKED = "checked"
 COMBOX_CURRENT_INDEX = "current_index"
 COMBOX_CURRENT_TEXT = "current_text"

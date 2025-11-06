@@ -1,11 +1,10 @@
-from typing import Dict, Optional, Union
+from typing import Dict, Optional
 
 from ...OJSubmitter.Constant.defaults import EMPTY_CONFIG
 from ...OJSubmitter.Constant.status import LoginStatus
 from ...OJSubmitter.Remote.remote_ctl import RemoteController
 from ..Crawler.crawler import Account
 from ..Interface.log_interface import BaseLogger, NonLogger
-from ..Models.identify import AccountParams, CookieModel
 from ..Resource import Resource
 from ..Typehint.remote_cfg import ConfigParams
 
@@ -48,10 +47,8 @@ class AccountManager:
         self.accounts_map: Dict[str, Account] = {}
         self.current_account: Optional[Account] = None
 
-    def update_current_account(self, account: Optional[Union[Account, str]]) -> None:
-        if isinstance(account, str):
-            account = self.accounts_map.get(account)
-        self.current_account = account
+    def update_current_account(self, account: Optional[str]) -> None:
+        self.current_account = (account and self.accounts_map.get(account)) or None
 
     def load_from_resource(self, resource: Resource) -> None:
         for acc in resource.resource.history_accounts.values():
@@ -70,7 +67,7 @@ class AccountManager:
 
     def login_account(self, account: str, password: Optional[str] = None) -> bool:
         acc: Optional[Account] = self.accounts_map.get(account)
-        if acc is None:
+        if acc is None or not acc.check_cookie_valid():
             if password is None:
                 return False
 
@@ -82,22 +79,14 @@ class AccountManager:
         return acc.login()["status"] == LoginStatus.SUCCESS
 
     def remember_account(self, account: str, password: str) -> bool:
-        self.accounts_map[account] = Account(account=account, password=password)
-        r: Resource = SharedInstances.resource
-        r.resource.history_accounts[account] = AccountParams(
-            account=account, password=password
-        )
-        r.save()
-        return True
+        if (
+            account in self.accounts_map
+            and self.accounts_map[account].password == password
+        ):
 
-    def keep_cookie(self, account: str) -> None:
-        r: Resource = SharedInstances.resource
-        acc = self.accounts_map.get(account)
-        if acc and acc.cookie:
-            r.resource.cookies[account] = CookieModel(
-                account=account, cookie=acc.cookie
-            )
-            r.save()
+            return True
+        self.accounts_map[account] = Account(account=account, password=password)
+        return True
 
     def logout_account(self, account: str) -> None:
         if account in self.accounts_map:
