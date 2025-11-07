@@ -1,0 +1,59 @@
+name: Remove ready-to-merge on new commits
+
+on:
+  push:
+    branches: ['**']
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  remove-ready-label:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Remove 'ready-to-merge' label from PRs for this branch
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const ref = process.env.GITHUB_REF || '';
+            const branch = ref.replace('refs/heads/', '');
+            if (!branch) {
+              core.info('No branch detected from GITHUB_REF, exiting.');
+              return;
+            }
+
+            const head = `${context.repo.owner}:${branch}`;
+            const pulls = await github.rest.pulls.list({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              head
+            });
+
+            if (!pulls.data || pulls.data.length === 0) {
+              core.info(`No open PRs found for branch: ${branch}`);
+              return;
+            }
+
+            for (const pr of pulls.data) {
+              const prNumber = pr.number;
+              const labels = (pr.labels || []).map(l => l.name);
+              if (labels.includes('ready-to-merge')) {
+                core.info(`Removing 'ready-to-merge' from PR #${prNumber}`);
+                try {
+                  await github.rest.issues.removeLabel({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: prNumber,
+                    name: 'ready-to-merge'
+                  });
+                } catch (err) {
+                  core.warning(`Failed to remove label from PR #${prNumber}: ${err}`);
+                }
+              } else {
+                core.info(`PR #${prNumber} does not have 'ready-to-merge' label`);
+              }
+            }

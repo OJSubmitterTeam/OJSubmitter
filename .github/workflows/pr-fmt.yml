@@ -2,7 +2,7 @@ name: PR Format and Autofix
 
 on:
   pull_request:
-    types: [opened, reopened, synchronize, edited]
+    types: [labeled]
 
 permissions:
   contents: write
@@ -11,6 +11,7 @@ permissions:
 jobs:
   format-pr:
     runs-on: windows-latest
+    if: github.event.label != null && github.event.label.name == 'ready-to-merge'
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
