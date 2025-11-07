@@ -1,0 +1,88 @@
+name: PR Format and Autofix
+
+on:
+  pull_request:
+    types: [labeled]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  format-pr:
+    runs-on: windows-latest
+    if: github.event.label != null && github.event.label.name == 'ready-to-merge'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Read .python-version
+        id: pyver
+        shell: pwsh
+        run: |
+          if (Test-Path '.python-version') {
+            $v = Get-Content .python-version -Raw
+            $v = $v.Trim()
+            if ($v) { echo "python=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append }
+            else { echo "python=3.11" | Out-File -FilePath $env:GITHUB_OUTPUT -Append }
+          } else {
+            echo "python=3.11" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          }
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ steps.pyver.outputs.python }}
+
+      - name: Install uv
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          pip install setuptools wheel
+          pip install uv
+      
+      - name: sync dev
+        shell: pwsh
+        run: |
+          uv sync --extra fmt-packs
+
+      - name: Run formatter
+        shell: pwsh
+        run: |
+          uv run fmt
+
+      - name: Detect formatting changes
+        id: detect_changes
+        shell: pwsh
+        run: |
+          git add -A
+          $status = git status --porcelain
+          if ($status) {
+            Write-Output "Formatting changes detected"
+            echo "changed=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          } else {
+            Write-Output "No formatting changes"
+            echo "changed=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          }
+      - name: Fail if formatting changes detected
+        if: steps.detect_changes.outputs.changed == 'true'
+        shell: pwsh
+        run: |
+          Write-Output "Formatting check failed: formatting changes are required."
+          Write-Output ""
+          Write-Output "Files changed by formatter (staged):"
+          $files = git --no-pager diff --name-only --cached
+          if ($files) { $files | ForEach-Object { Write-Output "  $_" } } else { Write-Output "  (none)" }
+          Write-Output ""
+          Write-Output "Staged diff (formatter changes):"
+          git --no-pager diff --cached || Write-Output "(no diff output)"
+          Write-Output ""
+          Write-Output "Please run locally to fix and push changes:" 
+          Write-Output "  uv run fmt"
+          Write-Output "  git add -A"
+          Write-Output "  git commit -m 'chore(format): apply formatting'"
+          Write-Output "  git push"
+          exit 1
