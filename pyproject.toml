@@ -19,9 +19,12 @@ dependencies = [
     "requests>=2.32.5",
     "types-colorama>=0.4.15.20250801",
     "types-requests>=2.32.4.20250913",
-    "mypy>=1.18.2",
-    "nuitka>=2.8.3",
 ]
+
+[project.optional-dependencies]
+fmt-packs = ["isort>=7.0.0", "black>=25.9.0"]
+tpc-packs = ["mypy>=1.18.2"]
+build-packs = ["nuitka>=2.8.3"]
 
 [tool.setuptools]
 py-modules = ["main"]

@@ -42,8 +42,13 @@ jobs:
           python -m pip install --upgrade pip
           pip install setuptools wheel
           pip install uv
+      
+      - name: sync dev
+        shell: pwsh
+        run: |
+          uv sync --extra fmt-packs
 
-      - name: Run formatter (uv run fmt)
+      - name: Run formatter
         shell: pwsh
         run: |
           uv run fmt
