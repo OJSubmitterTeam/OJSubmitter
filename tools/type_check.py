@@ -11,7 +11,7 @@ mypy_command: list[str] = [
     "--follow-imports=silent",
     "--exclude",
     *excludes,
-    *sys.argv,
+    *sys.argv[1:],
 ]
 
 
