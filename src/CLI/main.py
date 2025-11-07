@@ -2,6 +2,8 @@ import threading
 import time
 from typing import Dict, List, NoReturn, Optional
 
+from src.OJSubmitter.Models.identify import CookieModel
+
 from ..OJSubmitter.Constant.request_consts import LANGUAGE_MAP, Language
 from ..OJSubmitter.Crawler.crawler import (
     LevelProblemPage,
@@ -200,7 +202,10 @@ def account_manage() -> None:
                 password = input("请输入密码: ").strip()
                 account_manager.remember_account(account, password)
                 account_manager.login_account(account)
-                account_manager.keep_cookie(account)
+                tar_acc = account_manager.accounts_map[account]
+                resource.resource.cookies[account] = CookieModel(
+                    account=tar_acc.account, cookie=tar_acc.cookie
+                )
                 load_accounts()
 
             case 3:  # 删除账号
