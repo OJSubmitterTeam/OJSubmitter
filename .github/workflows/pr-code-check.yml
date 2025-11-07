@@ -143,6 +143,7 @@ jobs:
       - name: Run formatter
         shell: pwsh
         run: |
+          uv run isrt
           uv run fmt
 
       - name: Detect formatting changes
@@ -235,6 +236,7 @@ jobs:
           node token-gen.js
 
       - name: Post combined structured comment (Type + Formatter)
+        if: ${{ steps.run_tpc.outputs.tpc_failed == 'true' || steps.detect_changes.outputs.changed == 'true' }}
         uses: actions/github-script@v6
         env:
           TPC_OUTPUT: ${{ steps.run_tpc.outputs.tpc_output }}
