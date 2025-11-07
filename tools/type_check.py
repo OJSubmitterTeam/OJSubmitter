@@ -11,11 +11,11 @@ mypy_command: list[str] = [
     "--follow-imports=silent",
     "--exclude",
     *excludes,
-    *sys.argv,
+    *sys.argv[1:],
 ]
 
 
 def main() -> None:
     print("Running type check...")
     print("mypy command:", " ".join(mypy_command))
-    subprocess.run(mypy_command)
+    subprocess.run(mypy_command, shell=True, check=True)

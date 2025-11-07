@@ -14,7 +14,7 @@ def main() -> None:
 
     print("Running command:", " ".join(cmd))
     try:
-        subprocess.run(cmd, check=True)
+        subprocess.run(cmd, shell=True, check=True)
     except subprocess.CalledProcessError as e:
         print(f"Error occurred while running '{' '.join(cmd)}': {e}")
         sys.exit(1)
