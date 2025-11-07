@@ -89,10 +89,10 @@ jobs:
           pip install setuptools wheel
           pip install uv
 
-      - name: Run uv sync (ensure python + install project deps)
+      - name: sync dev
         shell: pwsh
         run: |
-          uv sync --python 3.11
+          uv sync --extra tpc-packs
 
       - name: check type
         shell: pwsh
