@@ -375,13 +375,22 @@ class LevelModeTableLogic(LogicFrame):
             self.clear_table()
             self.window.problem_status_label.setText("未开启")
             return None
-        elif status == RunningStatus.END:
+        elif status == RunningStatus.ENDED:
             self.logger.emit(
                 f"{cid} 关卡已结束",
                 source=LogSourceEnum.PROBLEM_DETECT_SYSTEM,
                 lvl="WRN",
             )
             self.window.problem_status_label.setText("已结束")
+        elif status == RunningStatus.NO_ACCESS:
+            self.logger.emit(
+                f"{cid} 关卡无权限访问",
+                source=LogSourceEnum.PROBLEM_DETECT_SYSTEM,
+                lvl="ERR",
+            )
+            self.clear_table()
+            self.window.problem_status_label.setText("无权限")
+            return None
         else:
             self.window.problem_status_label.setText("运行中")
 

@@ -2,7 +2,7 @@ import hashlib
 import re
 import threading
 import time
-from enum import Enum
+from enum import StrEnum
 from typing import Any, Callable, Dict, List, Optional, Tuple, TypedDict, cast
 
 import requests
@@ -266,10 +266,11 @@ class ProblemPackage(TypedDict):
     finished: bool
 
 
-class RunningStatus(Enum):
-    NOT_STARTED = 0
-    RUNNING = 1
-    END = 2
+class RunningStatus(StrEnum):
+    NOT_STARTED = "未开始"
+    RUNNING = "运行中"
+    ENDED = "已结束"
+    NO_ACCESS = "关卡被屏蔽或者无权进入"
 
 
 class ProblemGroup:
@@ -322,6 +323,9 @@ class ProblemGroup:
         resp = requests.get(url, cookies={"PHPSESSID": self.account.cookie})
         resp.encoding = "utf-8"
 
+        if RunningStatus.NO_ACCESS in resp.text:
+            return RunningStatus.NO_ACCESS
+
         if resp.status_code == 200:
             soup = BeautifulSoup(resp.text, "html.parser")
             center_divs: ResultSet[Tag] = soup.select("#main center")
@@ -329,10 +333,10 @@ class ProblemGroup:
                 status_spans = center.find_all("span")
                 for span in status_spans:
                     span_text = span.get_text(strip=True)
-                    if "运行中" in span_text:
+                    if RunningStatus.RUNNING in span_text:
                         return RunningStatus.RUNNING
-                    elif "已结束" in span_text:
-                        return RunningStatus.END
+                    elif RunningStatus.ENDED in span_text:
+                        return RunningStatus.ENDED
 
         return RunningStatus.NOT_STARTED
 

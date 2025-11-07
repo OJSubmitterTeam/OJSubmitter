@@ -18,6 +18,11 @@ class Resource:
 
     def __init__(self, path: str = RESOURCE_PATH) -> None:
         self.path = path
+        if not os.path.exists(self.path):
+            os.makedirs(self.path.replace("\\", "/").rsplit("/", 1)[0], exist_ok=True)
+            with open(self.path, "w", encoding="utf-8") as f:
+                f.write(EMPTY_RESOURCE.model_dump_json(indent=4))
+
         self.load()
 
     @property
@@ -44,11 +49,6 @@ class Resource:
             f.write(self._resource.model_dump_json(indent=4))
 
     def load(self) -> None:
-        if os.path.exists(self.path) is False:
-            os.makedirs(self.path.replace("\\", "/").rsplit("/", 1)[0], exist_ok=True)
-            with open(self.path, "w", encoding="utf-8") as f:
-                f.write(EMPTY_RESOURCE.model_dump_json(indent=4))
-
         with open(self.path, "r", encoding="utf-8") as f:
             text = f.read()
         try:
