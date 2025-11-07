@@ -19,7 +19,10 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          submodules: recursive
+          persist-credentials: true
+          token: ${{ secrets.SUBMODULE_TOKEN }}
+
 
       - name: Detect Python file changes
         id: detect
@@ -33,8 +36,26 @@ jobs:
           # Ensure the base ref is available locally
           git fetch origin $env:BASE_REF --no-tags --prune
 
-          # Find changed files between base and the head commit
-          $files = git diff --name-only origin/$env:BASE_REF...HEAD
+          # Try to find changed files between base and the head commit.
+          # Use a robust strategy: try three-dot range first, fall back to two-dot range.
+          $files = ''
+          try {
+            $files = git diff --name-only origin/$env:BASE_REF...HEAD 2>&1
+            if ($LASTEXITCODE -ne 0) { throw $files }
+          } catch {
+            Write-Output "git diff (three-dot) failed: $_"
+            Write-Output "Attempting fallback two-dot range..."
+            try {
+              $files = git diff --name-only origin/$env:BASE_REF..HEAD 2>&1
+              if ($LASTEXITCODE -ne 0) { throw $files }
+            } catch {
+              Write-Output "git diff fallback failed: $_"
+              Write-Output "Unable to compute diff safely (no merge base?). Defaulting to run checks."
+              echo "has_py=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+              return
+            }
+          }
+
           $py = $files | Where-Object { $_ -like '*.py' }
 
           if ($py) {
@@ -53,7 +74,9 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          submodules: recursive
+          persist-credentials: true
+          token: ${{ secrets.SUBMODULE_TOKEN }}
 
       - name: Read .python-version
         id: pyver
@@ -91,9 +114,8 @@ jobs:
         continue-on-error: true
         run: |
           # run type check and capture output and exit code into step outputs (avoid files)
-          $out = uv run tpc 2>&1
+          $out = uv run tpc --exclude .*SecretAPI.* 2>&1
           $code = $LASTEXITCODE
-
           # write multiline output to GITHUB_OUTPUT
           Write-Output "tpc output length: $($out.Length)"
           "tpc_output<<EOF" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
@@ -102,7 +124,12 @@ jobs:
 
           echo "tpc_exit=$code" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
-          if ($code -ne 0) {
+          # Determine failure: either non-zero exit code or mypy-style summary "Found X errors"
+          $failed = $false
+          if ($out -match 'Found\s+\d+\s+errors') { $failed = $true }
+          elseif ($code -ne 0) { $failed = $true }
+
+          if ($failed) {
             echo "tpc_failed=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           } else {
             echo "tpc_failed=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
