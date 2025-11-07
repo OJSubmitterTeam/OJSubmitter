@@ -1,4 +1,5 @@
 import subprocess
+import sys
 
 # e.g., UI_main.py
 excludes = [r"^.*UI_.*\.py$"]
@@ -10,6 +11,7 @@ mypy_command: list[str] = [
     "--follow-imports=silent",
     "--exclude",
     *excludes,
+    *sys.argv,
 ]
 
 

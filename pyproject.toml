@@ -42,6 +42,7 @@ cui = "scripts.compile_ui:main"
 help = "tools.help:main"
 clean = "tools.clean:main"
 tpc = "tools.type_check:main"
+isrt = "tools.import_sort:main"
 fmt = "tools.code_format:main"
 pcmt = "tools.pre_cmt:main"
 # application entry point
