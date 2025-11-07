@@ -18,4 +18,4 @@ mypy_command: list[str] = [
 def main() -> None:
     print("Running type check...")
     print("mypy command:", " ".join(mypy_command))
-    subprocess.run(mypy_command)
+    subprocess.run(mypy_command, shell=True, check=True)
