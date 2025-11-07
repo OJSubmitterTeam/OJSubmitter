@@ -1,0 +1,148 @@
+name: Remove ready-to-merge label (push and merge)
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+    types: [closed]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  remove-ready:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup Node (for GitHub App token generation)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install token helper dependencies
+        run: |
+          npm init -y
+          npm install jsonwebtoken node-fetch@2
+
+      - name: Generate GitHub App installation token
+        id: get_app_token
+        env:
+          APP_ID: ${{ secrets.APP_ID }}
+          APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+          const jwt = require('jsonwebtoken');
+          const fetch = require('node-fetch');
+
+          const appId = process.env.APP_ID;
+          const rawKey = process.env.APP_PRIVATE_KEY || '';
+          if (!appId || !rawKey) {
+            console.error('Missing APP_ID or APP_PRIVATE_KEY');
+            process.exit(1);
+          }
+          const privateKey = rawKey.includes('\\n') ? rawKey.replace(/\\n/g, '\n') : rawKey;
+
+          const now = Math.floor(Date.now() / 1000);
+          const payload = { iat: now - 60, exp: now + 9 * 60, iss: appId };
+          const token = jwt.sign(payload, privateKey, { algorithm: 'RS256' });
+
+          (async () => {
+            // Determine installation id for this repo
+            const repo = process.env.GITHUB_REPOSITORY; // e.g. owner/repo
+            const [owner, repoName] = repo.split('/');
+            const repoInstallRes = await fetch(`https://api.github.com/repos/${owner}/${repoName}/installation`, {
+              headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' }
+            });
+            if (!repoInstallRes.ok) {
+              console.error('Failed to get repo installation:', await repoInstallRes.text());
+              process.exit(2);
+            }
+            const repoInstall = await repoInstallRes.json();
+            const installationId = repoInstall.id;
+
+            const res = await fetch(`https://api.github.com/app/installations/${installationId}/access_tokens`, {
+              method: 'POST',
+              headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' }
+            });
+            if (!res.ok) {
+              console.error('Failed to create installation token:', await res.text());
+              process.exit(3);
+            }
+            const body = await res.json();
+            const appToken = body.token;
+            if (!appToken) {
+              console.error('No token returned');
+              process.exit(4);
+            }
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, `token=${appToken}\n`);
+          })();
+          NODE
+
+      - name: Remove 'ready-to-merge' label (push or merged PR)
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ steps.get_app_token.outputs.token }}
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+
+            if (context.eventName === 'push') {
+              const ref = process.env.GITHUB_REF || '';
+              const branch = ref.replace('refs/heads/', '');
+              if (!branch) {
+                core.info('No branch detected from GITHUB_REF, exiting.');
+                return;
+              }
+
+              const head = `${owner}:${branch}`;
+              const pulls = await github.rest.pulls.list({ owner, repo, state: 'open', head });
+
+              if (!pulls.data || pulls.data.length === 0) {
+                core.info(`No open PRs found for branch: ${branch}`);
+                return;
+              }
+
+              for (const pr of pulls.data) {
+                const prNumber = pr.number;
+                const labels = (pr.labels || []).map(l => l.name);
+                if (labels.includes('ready-to-merge')) {
+                  core.info(`Removing 'ready-to-merge' from PR #${prNumber}`);
+                  try {
+                    await github.rest.issues.removeLabel({ owner, repo, issue_number: prNumber, name: 'ready-to-merge' });
+                  } catch (err) {
+                    core.warning(`Failed to remove label from PR #${prNumber}: ${err}`);
+                  }
+                } else {
+                  core.info(`PR #${prNumber} does not have 'ready-to-merge' label`);
+                }
+              }
+
+              return;
+            }
+
+            if (context.eventName === 'pull_request') {
+              const pr = context.payload.pull_request;
+              if (!pr) { core.info('No pull_request in payload, exiting.'); return; }
+              if (pr.merged) {
+                const prNumber = pr.number;
+                const labels = (pr.labels || []).map(l => l.name);
+                if (labels.includes('ready-to-merge')) {
+                  core.info(`PR #${prNumber} merged — removing label`);
+                  try {
+                    await github.rest.issues.removeLabel({ owner, repo, issue_number: prNumber, name: 'ready-to-merge' });
+                  } catch (err) {
+                    core.warning(`Failed to remove label from merged PR #${prNumber}: ${err}`);
+                  }
+                } else {
+                  core.info(`Merged PR #${prNumber} did not have 'ready-to-merge'`);
+                }
+              } else {
+                core.info('Pull request closed but not merged; skipping.');
+              }
+              return;
+            }
+
+            core.info('Event not handled by this workflow.');
