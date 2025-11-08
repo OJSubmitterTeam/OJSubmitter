@@ -1,0 +1,219 @@
+name: Build and attach release artifact
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to use for the release (optional). If empty, the workflow will try to infer tag from push or release event.'
+        required: false
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-upload:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: true
+          token: ${{ secrets.SUBMODULE_TOKEN }}
+
+      - name: Read .python-version
+        id: pyver
+        shell: pwsh
+        run: |
+          if (Test-Path '.python-version') {
+              $v = Get-Content .python-version -Raw
+              $v = $v.Trim()
+              if ($v) { echo "python=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append }
+              else { echo "python=3.11" | Out-File -FilePath $env:GITHUB_OUTPUT -Append }
+          } else {
+              echo "python=3.11" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          }
+
+      - name: Set up Python from .python-version
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ steps.pyver.outputs.python }}
+
+      - name: Install build deps
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          pip install --upgrade setuptools wheel
+          pip install uv
+      
+      - name: Sync build dev
+        shell: pwsh
+        run: |
+          uv sync --extra build-packs
+
+      - name: Run uv build
+        shell: pwsh
+        run: |
+          uv run build --output-filename=OJSubmitter.exe
+      
+      - name: Debug - Show build output
+        shell: pwsh
+        run: |
+          Write-Host "=== Contents of dist/ ==="
+          if (Test-Path './dist') {
+            Get-ChildItem -Path './dist' -Recurse -Force | Select-Object FullName, Length, PSIsContainer | Format-Table -AutoSize
+          } else {
+            Write-Host "ERROR: dist/ directory does not exist"
+          }
+      
+      - name: Rename dist folder
+        shell: pwsh
+        run: |
+          Write-Host "Current directory: $PWD"
+          $src = Join-Path $PWD 'dist/main.dist'
+          $dst = Join-Path $PWD 'dist/OJSubmitter'
+          if (Test-Path $dst) { 
+            Write-Host "Removing existing $dst"
+            Remove-Item -Recurse -Force $dst 
+          }
+          if (Test-Path $src) {
+            Write-Host "Renaming $src to OJSubmitter"
+            Rename-Item -Path $src -NewName 'OJSubmitter'
+            if (Test-Path $dst) {
+              Write-Host "Successfully renamed to $dst"
+            }
+          } else {
+            Write-Host "ERROR: Source directory $src not found"
+            Get-ChildItem -Path './dist' -Force | Format-Table -AutoSize
+            exit 1
+          }
+
+      - name: Package dist
+        shell: pwsh
+        run: |
+          $distPath = Join-Path $PWD 'dist/OJSubmitter'
+          $zipPath = Join-Path $PWD 'dist/OJSubmitter.zip'
+          
+          Write-Host "=== Contents to be packaged ==="
+          if (Test-Path $distPath) {
+            Get-ChildItem -Path $distPath -Recurse -Force | Select-Object FullName, Length | Format-Table -AutoSize
+            $fileCount = (Get-ChildItem -Path $distPath -Recurse -File).Count
+            Write-Host "Total files to package: $fileCount"
+          } else {
+            Write-Host "ERROR: $distPath does not exist"
+            exit 1
+          }
+          
+          if (Test-Path $zipPath) { Remove-Item -Force $zipPath }
+          
+          # Compress all contents inside OJSubmitter directory
+          Compress-Archive -Path "$distPath\*" -DestinationPath $zipPath -Force
+          
+          if (Test-Path $zipPath) {
+            $zipSize = (Get-Item $zipPath).Length / 1MB
+            Write-Host "Successfully packaged to $zipPath (${zipSize:N2} MB)"
+          } else {
+            Write-Host "ERROR: Failed to create zip file"
+            exit 1
+          }
+
+      - name: Compute tag and upload_url
+        id: vars
+        shell: pwsh
+        run: |
+          $TAG_NAME = ''
+          if ($env:GITHUB_EVENT_NAME -eq 'push') {
+            $TAG_NAME = $env:GITHUB_REF -replace '^refs/tags/',''
+          } else {
+            $TAG_NAME = '${{ github.event.inputs.tag }}'
+          }
+          # Fallback: if TAG_NAME empty, try to use current ref name
+          if (-not $TAG_NAME -or $TAG_NAME -eq '') {
+            if ($env:GITHUB_REF -match '^refs/tags/(.+)') { 
+              $TAG_NAME = $Matches[1] 
+            }
+          }
+          # Ensure we have a valid tag
+          if (-not $TAG_NAME -or $TAG_NAME -eq '') {
+            Write-Host "ERROR: Unable to determine tag name. Please provide a tag via workflow_dispatch input or push a tag."
+            Write-Host "GITHUB_EVENT_NAME: $env:GITHUB_EVENT_NAME"
+            Write-Host "GITHUB_REF: $env:GITHUB_REF"
+            exit 1
+          }
+          Write-Host "Using tag: $TAG_NAME"
+          $UPLOAD_URL = ''
+          "tag=$TAG_NAME" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "upload_url=$UPLOAD_URL" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Create GitHub release (if needed)
+        id: create_release
+        if: ${{ steps.vars.outputs.upload_url == '' }}
+        uses: actions/create-release@v1
+        with:
+          tag_name: ${{ steps.vars.outputs.tag }}
+          release_name: ${{ steps.vars.outputs.tag }}
+          body: 'Automated build from CI'
+          draft: true
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Determine final upload_url
+        id: final_upload
+        shell: pwsh
+        run: |
+          $varsUploadUrl = '${{ steps.vars.outputs.upload_url }}'
+          if ($varsUploadUrl -and $varsUploadUrl -ne '') {
+            "upload_url=$varsUploadUrl" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          } else {
+            "upload_url=${{ steps.create_release.outputs.upload_url }}" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          }
+
+      - name: Upload all release assets
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $UPLOAD_URL = '${{ steps.final_upload.outputs.upload_url }}'
+          if (-not $UPLOAD_URL -or $UPLOAD_URL -eq '') { 
+            Write-Host "ERROR: upload_url is empty"
+            exit 1 
+          }
+          # strip any template suffix like {"?name,label"}
+          $BASE_URL = ($UPLOAD_URL -split '\{')[0]
+          Write-Host "Release upload base URL: $BASE_URL"
+          $files = @()
+          if (Test-Path './dist') { $files = Get-ChildItem -Path './dist' -Filter '*.zip' -File -ErrorAction SilentlyContinue }
+          if (-not $files -or $files.Count -eq 0) {
+            Write-Host "ERROR: no artifacts found in dist/ (expected .zip files)"
+            if (Test-Path './dist') { Get-ChildItem -Path './dist' -Force | Format-Table -AutoSize }
+            exit 1
+          }
+          $uploadFailed = $false
+          foreach ($f in $files) {
+            $name = $f.Name
+            Write-Host "Uploading $($f.FullName) as $name"
+            # Build the full URL with proper encoding
+            $uploadUrl = "${BASE_URL}?name=$name"
+            Write-Host "Upload URL: $uploadUrl"
+            # Use curl.exe (bundled on windows runners) to POST the binary
+            & curl.exe --silent --show-error --fail -X POST `
+              -H "Authorization: token $env:GITHUB_TOKEN" `
+              -H "Content-Type: application/octet-stream" `
+              --data-binary "@$($f.FullName)" `
+              "$uploadUrl"
+            if ($LASTEXITCODE -ne 0) {
+              Write-Host "ERROR: Failed to upload $name (exit code: $LASTEXITCODE)"
+              $uploadFailed = $true
+            } else {
+              Write-Host "Successfully uploaded $name"
+            }
+          }
+          if ($uploadFailed) {
+            Write-Host "ERROR: One or more uploads failed"
+            exit 1
+          }
+          Write-Host "All artifacts uploaded successfully"
