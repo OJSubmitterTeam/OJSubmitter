@@ -20,10 +20,11 @@ COMMAND: list[str] = [
     "--enable-plugin=pylint-warnings",
     "--windows-console-mode=attach",
     "--follow-imports",
-    "--output-dir=dist",
+    "--output-dir=./dist",
     "--python-flag=-O",
     *rm_cmd,
-    "main.py",
+    "./main.py",
+    *sys.argv[1:],
 ]
 
 
