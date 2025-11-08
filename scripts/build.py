@@ -19,6 +19,7 @@ COMMAND: list[str] = [
     "--enable-plugin=pyqt6",
     "--enable-plugin=pylint-warnings",
     "--windows-console-mode=attach",
+    "--windows-icon-from-ico=./assets/favicon.ico",
     "--follow-imports",
     "--output-dir=./dist",
     "--python-flag=-O",
