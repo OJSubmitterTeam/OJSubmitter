@@ -22,6 +22,7 @@ COMMAND: list[str] = [
     "--follow-imports",
     "--output-dir=./dist",
     "--python-flag=-O",
+    "--assume-yes-for-downloads",
     *rm_cmd,
     "./main.py",
     *sys.argv[1:],
