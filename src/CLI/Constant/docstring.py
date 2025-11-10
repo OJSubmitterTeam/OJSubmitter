@@ -1,6 +1,6 @@
 MAIN_HEADER = """
 OJSubmitter CLI 主程序已启动
-欢迎使用 OJHomeworkSubmitter
+欢迎使用 OJSubmitter
 当前版本: {VERSION}
 """
 
